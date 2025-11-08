@@ -1,28 +1,4 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
-
-/**
- * @title TrustVaultPlusV5 (refined)
- * @notice Gas, safety, and ergonomics focused refinement of the supplied TrustVaultPlusV5.
- * - Introduces custom errors to reduce revert-string gas costs
- * - Uses `external` where appropriate and `unchecked` in safe loops
- * - Consolidates common patterns and reduces duplicate storage reads
- * - Adds `supportsInterface` override required by multiple inheritance
- * - Small API ergonomics: clearer names, immutability where useful
- */
-
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-
-contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
-    using Counters for Counters.Counter;
-    using EnumerableSet for EnumerableSet.AddressSet;
-
-    // --- Constants / Types
+--- Constants / Types
     bytes32 public constant ISSUER_ROLE = keccak256("ISSUER_ROLE");
 
     enum CredentialState { Issued, Verified, Revoked }
@@ -32,18 +8,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         address subject;
         address issuer;
         string title;
-        string description; // free text or IPFS hash (recommended)
-        uint64 timestamp;
-        CredentialState state;
-    }
-
-    struct Identity {
-        string name;
-        string email;
-        bool isRegistered;
-    }
-
-    // --- Custom errors (cheaper than revert strings)
+        string description; --- Custom errors (cheaper than revert strings)
     error ZeroAddress();
     error AlreadyRegistered();
     error NotRegistered();
@@ -55,18 +20,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
     error EmptyArray();
     error EmptyTitle();
 
-    // --- Storage
-    Counters.Counter private _credentialIdCounter;
-    mapping(address => Identity) private _identities;
-    mapping(bytes32 => address) private _emailHashToAddress;
-
-    mapping(uint256 => Credential) private _credentials;
-    mapping(address => uint256[]) private _userCredentialIds;
-    mapping(address => uint256[]) private _issuerCredentialIds;
-
-    EnumerableSet.AddressSet private _issuers;
-
-    // --- Events
+    --- Events
     event IdentityRegistered(address indexed user, string name, string email);
     event IdentityUpdated(address indexed user, string name, string email);
     event IdentityDeregistered(address indexed user);
@@ -80,34 +34,12 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
     event CredentialRevoked(uint256 indexed credentialId, address indexed revokedBy);
     event CredentialUpdated(uint256 indexed credentialId, string newTitle, string newDescription, address indexed updatedBy);
 
-    // --- Constructor
-    constructor() {
-        _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
-        _setupRole(ISSUER_ROLE, _msgSender());
-        transferOwnership(_msgSender());
-
-        // Start IDs at 1 for clearer truthiness
+    Start IDs at 1 for clearer truthiness
         _credentialIdCounter.increment();
         _issuers.add(_msgSender());
     }
 
-    // --- Modifiers
-    modifier onlyRegistered(address user) {
-        if (!_identities[user].isRegistered) revert NotRegistered();
-        _;
-    }
-
-    modifier credentialExists(uint256 credentialId) {
-        if (credentialId == 0 || _credentials[credentialId].id == 0) revert CredentialNotFound();
-        _;
-    }
-
-    modifier onlyIssuer() {
-        if (!hasRole(ISSUER_ROLE, _msgSender())) revert NotIssuer();
-        _;
-    }
-
-    // --- Identity management
+    --- Identity management
 
     function registerIdentity(string calldata name, string calldata email) external whenNotPaused {
         if (_identities[_msgSender()].isRegistered) revert AlreadyRegistered();
@@ -116,23 +48,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         bytes32 h = keccak256(bytes(email));
         if (_emailHashToAddress[h] != address(0)) revert EmailInUse();
 
-        // single SSTORE with struct assignment
-        _identities[_msgSender()] = Identity({ name: name, email: email, isRegistered: true });
-        _emailHashToAddress[h] = _msgSender();
-
-        emit IdentityRegistered(_msgSender(), name, email);
-    }
-
-    function updateIdentity(string calldata name, string calldata email) external whenNotPaused onlyRegistered(_msgSender()) {
-        if (bytes(name).length == 0 || bytes(email).length == 0) revert InvalidInput();
-
-        Identity storage idRec = _identities[_msgSender()];
-        bytes32 oldHash = keccak256(bytes(idRec.email));
-        bytes32 newHash = keccak256(bytes(email));
-
-        if (oldHash != newHash) {
-            if (_emailHashToAddress[newHash] != address(0)) revert EmailInUse();
-            // clear old only if bound to sender
+        clear old only if bound to sender
             if (_emailHashToAddress[oldHash] == _msgSender()) {
                 _emailHashToAddress[oldHash] = address(0);
             }
@@ -168,12 +84,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         return _emailHashToAddress[keccak256(bytes(email))] != address(0);
     }
 
-    /// @notice Convenience view to check if an address has a registered identity
-    function identityExists(address user) external view returns (bool) {
-        return _identities[user].isRegistered;
-    }
-
-    // --- Issuer management (owner)
+    /--- Issuer management (owner)
 
     function grantIssuer(address account) external onlyOwner whenNotPaused {
         if (account == address(0)) revert ZeroAddress();
@@ -212,12 +123,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         return (page, to);
     }
 
-    /// @notice Count of known issuers
-    function issuersCount() external view returns (uint256) {
-        return _issuers.length();
-    }
-
-    // --- Pause / Unpause
+    /--- Pause / Unpause
     function pause() external onlyOwner {
         _pause();
     }
@@ -226,14 +132,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         _unpause();
     }
 
-    // --- Credential lifecycle helpers
-    function _nextId() internal returns (uint256) {
-        uint256 id = _credentialIdCounter.current();
-        _credentialIdCounter.increment();
-        return id;
-    }
-
-    /// @dev Core internal issue function (no modifiers) - minimally checks inputs.
+    @dev Core internal issue function (no modifiers) - minimally checks inputs.
     function _issueCredential(address issuer, address subject, string calldata title, string calldata description)
         internal returns (uint256)
     {
@@ -258,14 +157,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         return cid;
     }
 
-    /// @notice Issue a single credential. Subject must be registered.
-    function issueCredential(address subject, string calldata title, string calldata description)
-        external whenNotPaused onlyIssuer onlyRegistered(subject) returns (uint256)
-    {
-        return _issueCredential(_msgSender(), subject, title, description);
-    }
-
-    /// @notice Batch issue credentials; ensures subjects are registered.
+    /@notice Batch issue credentials; ensures subjects are registered.
     function batchIssueCredentials(
         address[] calldata subjects,
         string[] calldata titles,
@@ -277,16 +169,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
 
         uint256[] memory issuedIds = new uint256[](n);
         for (uint256 i = 0; i < n; ) {
-            // require each subject to be registered to match behavior of issueCredential
-            if (!_identities[subjects[i]].isRegistered) revert NotRegistered();
-            issuedIds[i] = _issueCredential(_msgSender(), subjects[i], titles[i], descriptions[i]);
-            unchecked { ++i; }
-        }
-        emit CredentialBatchIssued(issuedIds, _msgSender());
-        return issuedIds;
-    }
-
-    /// @notice Issue and mark verified atomically.
+            @notice Issue and mark verified atomically.
     function issueAndVerify(address subject, string calldata title, string calldata description)
         external whenNotPaused onlyIssuer onlyRegistered(subject) returns (uint256)
     {
@@ -319,32 +202,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         }
     }
 
-    // Revoke: only issuer of that credential or owner
-    function revokeCredential(uint256 credentialId) external whenNotPaused credentialExists(credentialId) {
-        Credential storage cred = _credentials[credentialId];
-        if (cred.state == CredentialState.Revoked) revert InvalidInput();
-        if (_msgSender() != cred.issuer && _msgSender() != owner()) revert NotAuthorized();
-        cred.state = CredentialState.Revoked;
-        emit CredentialRevoked(credentialId, _msgSender());
-    }
-
-    /**
-     * @notice Batch revoke: caller must be an issuer or the owner. This reduces per-credential permission checks.
-     */
-    function batchRevoke(uint256[] calldata ids) external nonReentrant whenNotPaused {
-        uint256 n = ids.length;
-        if (n == 0) revert EmptyArray();
-
-        bool callerIsOwner = _msgSender() == owner();
-        bool callerIsIssuer = hasRole(ISSUER_ROLE, _msgSender());
-        if (!callerIsOwner && !callerIsIssuer) revert NotAuthorized();
-
-        for (uint256 i = 0; i < n; ) {
-            uint256 id = ids[i];
-            if (id != 0) {
-                Credential storage cred = _credentials[id];
-                if (cred.id != 0 && cred.state != CredentialState.Revoked) {
-                    // allow if owner OR the credential's issuer matches caller
+    allow if owner OR the credential's issuer matches caller
                     if (callerIsOwner || cred.issuer == _msgSender()) {
                         cred.state = CredentialState.Revoked;
                         emit CredentialRevoked(id, _msgSender());
@@ -369,13 +227,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         emit CredentialUpdated(credentialId, newTitle, newDescription, _msgSender());
     }
 
-    // --- Views
-    function getCredential(uint256 credentialId) external view credentialExists(credentialId) returns (Credential memory) {
-        return _credentials[credentialId];
-    }
-
-    function totalCredentials() external view returns (uint256) {
-        // counter started at 1 and increments after use; subtract 1 to get issued count
+    counter started at 1 and increments after use; subtract 1 to get issued count
         return _credentialIdCounter.current() - 1;
     }
 
@@ -417,16 +269,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         return (page, to);
     }
 
-    /// @notice Convenience views for counts (useful for front-ends)
-    function userCredentialCount(address user) external view returns (uint256) {
-        return _userCredentialIds[user].length;
-    }
-
-    function issuerCredentialCount(address issuer) external view returns (uint256) {
-        return _issuerCredentialIds[issuer].length;
-    }
-
-    // --- Admin utilities
+    /--- Admin utilities
     function ownerForceRevoke(uint256 credentialId) external onlyOwner credentialExists(credentialId) whenNotPaused {
         Credential storage cred = _credentials[credentialId];
         if (cred.state == CredentialState.Revoked) return;
@@ -440,29 +283,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
     }
 
     function renounceAllRoles() external onlyOwner whenNotPaused {
-        // WARNING: calling this will remove the DEFAULT_ADMIN_ROLE from owner. Be careful.
-        revokeRole(DEFAULT_ADMIN_ROLE, _msgSender());
-    }
-
-    /**
-     * @notice Returns an existing credential id issued by the caller for the subject/title (if any), otherwise issues a new one.
-     */
-    function issueIfNotExists(address subject, string calldata title, string calldata description)
-        external whenNotPaused onlyIssuer onlyRegistered(subject) returns (uint256)
-    {
-        uint256[] storage issuerList = _issuerCredentialIds[_msgSender()];
-        bytes32 titleHash = keccak256(bytes(title));
-        for (uint256 i = 0; i < issuerList.length; ) {
-            Credential storage c = _credentials[issuerList[i]];
-            if (c.subject == subject && keccak256(bytes(c.title)) == titleHash && c.state != CredentialState.Revoked) {
-                return c.id;
-            }
-            unchecked { ++i; }
-        }
-        return _issueCredential(_msgSender(), subject, title, description);
-    }
-
-    // small helper view for frontends
+        small helper view for frontends
     function getCredentialState(uint256 credentialId) external view returns (CredentialState) {
         return _credentials[credentialId].state;
     }
@@ -478,19 +299,7 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         for (uint256 i = 0; i < n; ) {
             uint256 id = ids[i];
             if (id != 0 && _credentials[id].id != 0) {
-                // copy storage struct to memory
-                Credential storage s = _credentials[id];
-                out[i] = Credential({
-                    id: s.id,
-                    subject: s.subject,
-                    issuer: s.issuer,
-                    title: s.title,
-                    description: s.description,
-                    timestamp: s.timestamp,
-                    state: s.state
-                });
-            } else {
-                // leave zeroed
+                leave zeroed
             }
             unchecked { ++i; }
         }
@@ -502,4 +311,6 @@ contract TrustVaultPlusV5 is AccessControl, Ownable, Pausable, ReentrancyGuard {
         return AccessControl.supportsInterface(interfaceId);
     }
 }
-
+// 
+End
+// 
