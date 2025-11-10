@@ -306,11 +306,8 @@
         return out;
     }
 
-    // --- ERC165 / AccessControl compatibility
-    function supportsInterface(bytes4 interfaceId) public view virtual override(AccessControl) returns (bool) {
-        return AccessControl.supportsInterface(interfaceId);
-    }
-}
+    End
+// 
 // 
 End
 // 
